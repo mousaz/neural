@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+  <head> </head>
+  <body>
+    <div>
+      <input type="file" id="file-selector" />
+    </div>
+    <div>
+      <label for="learning-rate">Learning Rate:</label>
+      <input type="text" id="learning-rate" value="0.01" />
+      <label for="error-goal">Goal:</label>
+      <input type="text" id="error-goal" value="0.03" />
+      <label for="epochs"># Epochs:</label>
+      <input type="text" id="epochs" value="1000" />
+      <button id="start-learning">Start</button>
+    </div>
+    <div>
+      <label>Number of Hidden Layers: </label>
+      <button id="remove-hidden-layer">-</button>
+      <label id="num-of-hiddenLayers-label">1</label>
+      <button id="add-hidden-layer">+</button>
+    </div>
+    <div id="layers-config-container">
+      <div id="layer-1-config">
+        <label for="activation-func-1">Activation Function:</label>
+        <select name="act-func" id="activation-func-1">
+          <option value="relu">ReLU</option>
+          <option value="linear">Linear</option>
+          <option value="sig">Sigmoid</option>
+          <option value="tanh">tanh</option>
+        </select>
+        <label># Neurons</label>
+        <button id="remove-neuron-hidden-layer-1">-</button>
+        <label id="num-of-hiddenLayer-1-label">2</label>
+        <button id="add-neuron-hidden-layer-1">+</button>
+      </div>
+      <div id="layer-2-config" style="visibility: hidden">
+        <label for="activation-func-2">Activation Function:</label>
+        <select name="act-func" id="activation-func-2">
+          <option value="relu">ReLU</option>
+          <option value="linear">Linear</option>
+          <option value="sig">Sigmoid</option>
+          <option value="tanh">tanh</option>
+        </select>
+        <label># Neurons</label>
+        <button id="remove-neuron-hidden-layer-2">-</button>
+        <label id="num-of-hiddenLayer-2-label">2</label>
+        <button id="add-neuron-hidden-layer-2">+</button>
+      </div>
+      <div id="layer-3-config" style="visibility: hidden">
+        <label for="activation-func-3">Activation Function:</label>
+        <select name="act-func" id="activation-func-3">
+          <option value="relu">ReLU</option>
+          <option value="linear">Linear</option>
+          <option value="sig">Sigmoid</option>
+          <option value="tanh">tanh</option>
+        </select>
+        <label># Neurons</label>
+        <button id="remove-neuron-hidden-layer-3">-</button>
+        <label id="num-of-hiddenLayer-3-label">2</label>
+        <button id="add-neuron-hidden-layer-3">+</button>
+      </div>
+    </div>
+    <div>
+      <canvas id="network-canvas" width="800" height="500"></canvas>
+      <canvas id="data-canvas" width="400" height="400"></canvas>
+    </div>
+    <script type="application/javascript" src="DataLoader.js"></script>
+    <script type="module">
+      import NeuralNetwork from "./NeuralNetwork.js";
+
+      function getMaximumAndMinimum(vector) {
+        let max = -Infinity;
+        let min = Infinity;
+        for (const point of vector) {
+          const value = parseFloat(point);
+          if (value > max) max = value;
+          if (value < min) min = value;
+        }
+
+        return [max, min];
+      }
+
+      function getClasses(vector) {
+        const classes = {};
+        let i = 0;
+        for (const value of vector) {
+          if (classes[value] === undefined) {
+            classes[value] = i;
+            i++;
+          }
+        }
+
+        return classes;
+      }
+
+      function drawData(data) {
+        const dataCanvas = document.getElementById("data-canvas");
+        const dataCanvasCtx = dataCanvas.getContext("2d");
+        const colors = ["green", "red", "yellow", "orange", "magenta"];
+        const shapes = ["x", "o", "△", "*", "☆"];
+        const [xMax, xMin] = getMaximumAndMinimum(data[0]);
+        const [yMax, yMin] = getMaximumAndMinimum(data[1]);
+        const classes = getClasses(data[2]);
+        dataCanvasCtx.fillStyle = "lightGray";
+        dataCanvasCtx.fillRect(0, 0, dataCanvas.width, dataCanvas.height);
+        for (let i = 0; i < data[0].length; i++) {
+          const x =
+            (dataCanvas.width * (parseFloat(data[0][i]) - xMax)) /
+            (xMin - xMax);
+          const y =
+            (dataCanvas.height * (parseFloat(data[1][i]) - yMax)) /
+            (yMin - yMax);
+          dataCanvasCtx.strokeStyle = colors[classes[data[2][i]]];
+          dataCanvasCtx.strokeText(shapes[classes[data[2][i]]], x, y);
+        }
+      }
+
+      function drawNetwork(network) {
+        const networkCanvas = document.getElementById("network-canvas");
+        const networkCanvasCtx = networkCanvas.getContext("2d");
+        const inputLayer = network.getInputLayer();
+        const hiddenLayers = network.getHiddenLayers();
+        const outputLayer = network.getOutputLayer();
+        networkCanvasCtx.fillStyle = "lightgray";
+        networkCanvasCtx.fillRect(
+          0,
+          0,
+          networkCanvas.width,
+          networkCanvas.height
+        );
+        let prevLayerNeuronsCount = drawLayerNeurons(
+          networkCanvas,
+          networkCanvasCtx,
+          inputLayer,
+          0,
+          0,
+          0
+        );
+
+        let xStep = networkCanvas.width / (hiddenLayers.length + 2);
+        let xStart = xStep;
+        for (const layer of hiddenLayers) {
+          prevLayerNeuronsCount = drawLayerNeurons(
+            networkCanvas,
+            networkCanvasCtx,
+            layer,
+            xStart,
+            xStep,
+            prevLayerNeuronsCount
+          );
+          xStart += xStep;
+        }
+
+        drawLayerNeurons(
+          networkCanvas,
+          networkCanvasCtx,
+          outputLayer,
+          xStart,
+          xStep,
+          prevLayerNeuronsCount
+        );
+      }
+
+      function drawLayerNeurons(
+        networkCanvas,
+        networkCanvasCtx,
+        layer,
+        xStart,
+        xStep,
+        prevLayerNeuronsCount
+      ) {
+        networkCanvasCtx.fillStyle = "gray";
+        let i = 0;
+        const neuronDimension = 40;
+        const shift = 10;
+        for (const neuron of layer) {
+          const x1 = xStart + shift;
+          const y1 = i * (neuronDimension + 3 * shift) + shift;
+          networkCanvasCtx.fillRect(x1, y1, neuronDimension, neuronDimension);
+
+          for (let j = 0; j < prevLayerNeuronsCount; j++) {
+            networkCanvasCtx.beginPath();
+            const connectionPoint = y1 + neuronDimension / 2;
+            networkCanvasCtx.moveTo(x1, connectionPoint);
+            networkCanvasCtx.lineTo(
+              x1 - xStep + neuronDimension,
+              j * (neuronDimension + 3 * shift) + shift + neuronDimension / 2
+            );
+            networkCanvasCtx.stroke();
+            networkCanvasCtx.closePath();
+          }
+
+          i++;
+        }
+
+        return i;
+      }
+
+      function updateLayersConfig(isAdded, num) {
+        if (isAdded) {
+          document.getElementById(`layer-${num}-config`).style.visibility =
+            "visible";
+        } else {
+          document.getElementById(`layer-${num + 1}-config`).style.visibility =
+            "hidden";
+          document.getElementById(
+            `num-of-hiddenLayer-${num + 1}-label`
+          ).innerText = "2";
+          document.getElementById(`activation-func-${num + 1}`).value = "relu";
+        }
+      }
+
+      const fileSelector = document.getElementById("file-selector");
+      fileSelector.addEventListener("change", (event) => {
+        const fileList = event.target.files;
+        loadDataFromFile(fileList[0]).then((data) => {
+          const activationFunc =
+            document.getElementById("activation-func-1").value;
+          window.neuralNetworkInstance = new NeuralNetwork(
+            data,
+            activationFunc,
+            true
+          );
+          drawData(data);
+          drawNetwork(window.neuralNetworkInstance);
+        });
+      });
+
+      const startButton = document.getElementById("start-learning");
+      startButton.onclick = () => {
+        const epochs = parseInt(document.getElementById("epochs").value);
+        const learningRate = parseFloat(
+          document.getElementById("learning-rate").value
+        );
+        const errorGoal = parseFloat(
+          document.getElementById("error-goal").value
+        );
+        window.neuralNetworkInstance.startLearning(
+          learningRate,
+          epochs,
+          errorGoal
+        );
+      };
+
+      const addHiddenLayer = document.getElementById("add-hidden-layer");
+      addHiddenLayer.onclick = () => {
+        const label = document.getElementById("num-of-hiddenLayers-label");
+        let val = parseInt(label.innerText);
+        if (val == 3) return;
+        val++;
+        if (window.neuralNetworkInstance) {
+          window.neuralNetworkInstance.increaseHiddenLayers();
+          drawNetwork(window.neuralNetworkInstance);
+          label.innerText = val;
+          updateLayersConfig(true, val);
+        }
+      };
+
+      const removeHiddenLayer = document.getElementById("remove-hidden-layer");
+      removeHiddenLayer.onclick = () => {
+        const label = document.getElementById("num-of-hiddenLayers-label");
+        let val = parseInt(label.innerText);
+        if (val == 1) return;
+        val--;
+        if (window.neuralNetworkInstance) {
+          window.neuralNetworkInstance.decreaseHiddenLayers();
+          drawNetwork(window.neuralNetworkInstance);
+          label.innerText = val;
+          updateLayersConfig(false, val);
+        }
+      };
+
+      for (let i = 0; i < 3; i++) {
+        const actFunc = document.getElementById(`activation-func-${i + 1}`);
+        actFunc.onchange = () => {
+          if (window.neuralNetworkInstance) {
+            window.neuralNetworkInstance.updateLayerActivationFunction(
+              actFunc.value,
+              i
+            );
+          }
+        };
+
+        document.getElementById(`remove-neuron-hidden-layer-${i + 1}`).onclick =
+          () => {
+            const label = document.getElementById(
+              `num-of-hiddenLayer-${i + 1}-label`
+            );
+            let val = parseInt(label.innerText);
+            if (val == 1) return;
+            val--;
+            if (window.neuralNetworkInstance) {
+              window.neuralNetworkInstance.removeNeuronFromHiddenLayer(i);
+              drawNetwork(window.neuralNetworkInstance);
+              label.innerText = val;
+            }
+          };
+        document.getElementById(`add-neuron-hidden-layer-${i + 1}`).onclick =
+          () => {
+            const label = document.getElementById(
+              `num-of-hiddenLayer-${i + 1}-label`
+            );
+            let val = parseInt(label.innerText);
+            if (val == 6) return;
+            val++;
+            if (window.neuralNetworkInstance) {
+              window.neuralNetworkInstance.addNeuronToHiddenLayer(i);
+              drawNetwork(window.neuralNetworkInstance);
+              label.innerText = val;
+            }
+          };
+      }
+    </script>
+  </body>
+</html>
