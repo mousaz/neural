@@ -6,6 +6,10 @@ export class Perceptron {
   #theta = 0;
   #thetaSign = -1;
 
+  static #getRandomWeight(range) {
+    return range * (2 * Math.random() - 1);
+  }
+
   constructor(activationFunction, activationFunctionDerivative) {
     this.#activationFunction = activationFunction;
     this.#activationFunctionDerivative = activationFunctionDerivative;
@@ -28,6 +32,22 @@ export class Perceptron {
     }
 
     return this;
+  }
+
+  activate(inputs) {
+    if (inputs.length !== this.#inputWeights.length) {
+      throw new Error("Inputs must have the same length as weights.");
+    }
+
+    let sum = this.#theta * this.#thetaSign;
+    for (let i = 0; i < this.#inputWeights.length; i++) {
+      sum += this.#inputWeights[i] * inputs[i];
+    }
+
+    return {
+      value: this.#activationFunction(sum),
+      derivedValue: this.#activationFunctionDerivative(sum),
+    };
   }
 
   set thetaSign(s) {
@@ -58,27 +78,15 @@ export class Perceptron {
     this.#activationFunction = activationFunction;
   }
 
+  get activationFunction() {
+    return this.#activationFunction;
+  }
+
   set activationFunctionDerivative(activationFunctionDerivative) {
     this.#activationFunctionDerivative = activationFunctionDerivative;
   }
 
-  activate(inputs) {
-    if (inputs.length !== this.#inputWeights.length) {
-      throw new Error("Inputs must have the same length as weights.");
-    }
-
-    let sum = this.#theta * this.#thetaSign;
-    for (let i = 0; i < this.#inputWeights.length; i++) {
-      sum += this.#inputWeights[i] * inputs[i];
-    }
-
-    return {
-      value: this.#activationFunction(sum),
-      derivedValue: this.#activationFunctionDerivative(sum),
-    };
-  }
-
-  static #getRandomWeight(range) {
-    return range * (2 * Math.random() - 1);
+  get activationFunctionDerivative() {
+    return this.#activationFunctionDerivative;
   }
 }

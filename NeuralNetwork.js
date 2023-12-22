@@ -17,14 +17,27 @@ export default class NeuralNetwork {
   #hiddenLayers = [];
   #outputLayer = [];
   #data = null;
-  #activationFunction = tanh;
-  #activationFunctionDerivative = tanhDerivative;
+  #hiddenActivationFunction = tanh;
+  #hiddenActivationFunctionDerivative = tanhDerivative;
+  #outputActivationFunction = tanh;
+  #outputActivationFunctionDerivative = tanhDerivative;
   #outputExpectedValuesByClasses = {};
 
-  constructor(data, activationFunctionName, isClassification) {
+  onIterationCompleted = () => {};
+  onEpochCompleted = () => {};
+
+  constructor(
+    data,
+    hiddenLayersActivation,
+    outputLayerActivation,
+    isClassification,
+    params
+  ) {
     this.#data = data;
-    [this.#activationFunction, this.#activationFunctionDerivative] =
-      this.#getActivationFunction(activationFunctionName);
+    [this.#hiddenActivationFunction, this.#hiddenActivationFunctionDerivative] =
+      this.#getActivationFunction(hiddenLayersActivation);
+    [this.#outputActivationFunction, this.#outputActivationFunctionDerivative] =
+      this.#getActivationFunction(outputLayerActivation);
 
     // Initialize input neurons
     const numOfInputNeurons = data.columnsCount - 1;
@@ -34,15 +47,20 @@ export default class NeuralNetwork {
       this.#inputLayer.push(perceptron);
     }
 
+    if (params) {
+      this.#setNetworkParams(params);
+      return this;
+    }
+
     // Initialize 1-hidden layer with two neurons
     this.#hiddenLayers.push([
       new Perceptron(
-        this.#activationFunction,
-        this.#activationFunctionDerivative
+        this.#hiddenActivationFunction,
+        this.#hiddenActivationFunctionDerivative
       ).initialize(this.#inputLayer.length),
       new Perceptron(
-        this.#activationFunction,
-        this.#activationFunctionDerivative
+        this.#hiddenActivationFunction,
+        this.#hiddenActivationFunctionDerivative
       ).initialize(this.#inputLayer.length),
     ]);
 
@@ -55,7 +73,8 @@ export default class NeuralNetwork {
         classes[c] = true;
       }
 
-      numberOfOutputNeurons = Object.getOwnPropertyNames(classes).length;
+      let numberOfClasses = Object.getOwnPropertyNames(classes).length;
+      numberOfOutputNeurons = numberOfClasses > 2 ? numberOfClasses : 1;
       let classNum = 0;
       for (const c in classes) {
         this.#outputExpectedValuesByClasses[c] = new Array(
@@ -69,86 +88,169 @@ export default class NeuralNetwork {
       this.#hiddenLayers[this.#hiddenLayers.length - 1].length;
     for (let i = 0; i < numberOfOutputNeurons; i++) {
       const perceptron = new Perceptron(
-        this.#activationFunction,
-        this.#activationFunctionDerivative
+        this.#outputActivationFunction,
+        this.#outputActivationFunctionDerivative
       );
       perceptron.initialize(numberOfPreviousHiddenLayerNeurons);
       this.#outputLayer.push(perceptron);
     }
   }
 
-  startLearning(learningRate, epochs, targetError) {
+  startLearning(
+    learningRate,
+    [learnPercentage, validationPercentage],
+    epochs,
+    targetError
+  ) {
     this.#isLearning = true;
+    const learnDataLength = Math.floor(this.#data.rowsCount * learnPercentage);
+    const validationDataLength = Math.floor(
+      this.#data.rowsCount * validationPercentage
+    );
     const layers = this.#hiddenLayers.concat([[...this.#outputLayer]]);
     for (let epochNumber = 1; epochNumber <= epochs; epochNumber++) {
       let sse = 0;
-      for (let i = 0; i < this.#data.rowsCount; i++) {
+      for (
+        let dataRowIndex = 0;
+        dataRowIndex < learnDataLength;
+        dataRowIndex++
+      ) {
         // Activate
         let activatedValues = [];
-        for (let x = 0; x < this.#data.columnsCount - 1; x++) {
-          activatedValues.push({ value: parseFloat(this.#data[x][i]) });
+        for (
+          let dataVariableIndex = 0;
+          dataVariableIndex < this.#data.columnsCount - 1;
+          dataVariableIndex++
+        ) {
+          activatedValues.push({
+            value: parseFloat(this.#data[dataVariableIndex][dataRowIndex]),
+          });
         }
 
         activatedValues = [[...activatedValues]];
-        for (let l = 0; l < layers.length; l++) {
-          const layerInputs = activatedValues[l].map(
+        for (let layerIndex = 0; layerIndex < layers.length; layerIndex++) {
+          const layerInputs = activatedValues[layerIndex].map(
             (layerValues) => layerValues.value
           );
           activatedValues.push(
-            layers[l].map((neuron) => neuron.activate(layerInputs))
+            layers[layerIndex].map((neuron) => neuron.activate(layerInputs))
           );
         }
 
         // Weight Training
         let errors = [];
-        for (let l = layers.length - 1; l >= 0; l--) {
-          const expectedOutput =
-            this.#outputExpectedValuesByClasses[
-              this.#data[this.#data.columnsCount - 1][i]
-            ];
+        const expectedOutput = this.#getExpectedOutput(
+          this.#data[this.#data.columnsCount - 1][dataRowIndex]
+        );
+        for (
+          let layerIndex = layers.length - 1;
+          layerIndex >= 0;
+          layerIndex--
+        ) {
           let layerOutput = activatedValues.pop();
 
-          if (l === layers.length - 1) {
+          if (layerIndex === layers.length - 1) {
             // Calculate output layer errors and consider them in the SSE calculation
-            errors = expectedOutput.map(
-              (value, index) => value - layerOutput[index].value
-            );
+            errors = expectedOutput.map((value, index) => {
+              return value - layerOutput[index].value;
+            });
             sse += errors.reduce((prev, curr) => prev + curr * curr, 0);
           }
+
+          const layer = layers[layerIndex];
 
           let sigmas = errors.map(
             (err, index) => err * layerOutput[index].derivedValue
           );
-          let deltas = sigmas.map((sigma, index) => {
-            return layers[l][index].inputWeights.map(
-              (w) => w * sigma * learningRate
+
+          let deltas = [];
+          errors = [];
+          for (let neuronIndex = 0; neuronIndex < layer.length; neuronIndex++) {
+            let sigma = sigmas[neuronIndex];
+            deltas.push(
+              layer[neuronIndex].inputWeights.map(
+                (_, index) =>
+                  activatedValues[activatedValues.length - 1][index].value *
+                  sigma *
+                  learningRate
+              )
             );
-          });
-          errors = sigmas;
+
+            // Update errors for the previous layer (hidden)
+            if (!errors.length)
+              errors = new Array(layer[neuronIndex].inputWeights.length).fill(
+                0
+              );
+            for (
+              let inputIndex = 0;
+              inputIndex < layer[neuronIndex].inputWeights.length;
+              inputIndex++
+            ) {
+              errors[inputIndex] =
+                errors[inputIndex] +
+                layer[neuronIndex].inputWeights[inputIndex] * sigma;
+            }
+          }
 
           // Update the weights
           deltas.forEach((delta, index) => {
-            layers[l][index].inputWeights = delta.map(
-              (d, dIndex) => layers[l][index].inputWeights[dIndex] + d
+            layer[index].inputWeights = delta.map(
+              (d, dIndex) => layer[index].inputWeights[dIndex] + d
             );
-            layers[l][index].theta +=
-              layers[l][index].theta *
-              layers[l][index].thetaSign *
-              sigmas[index];
+            layer[index].theta +=
+              layer[index].thetaSign * sigmas[index] * learningRate;
           });
         }
+
+        this.onIterationCompleted();
       }
 
       // Check sse and mse
-      if (sse <= targetError) {
+      const mse = sse / this.#data.rowsCount;
+      if (mse <= targetError) {
         // Achieved target error; end learning
         break;
       }
+
+      const validationError = this.validate(
+        learnDataLength,
+        validationDataLength
+      );
+      this.onEpochCompleted(mse, validationError);
     }
+
+    this.#isLearning = false;
   }
 
   stopLearning() {
     this.#isLearning = false;
+  }
+
+  validate(dataStartIndex, validationDataLength) {
+    let validationErrors = 0;
+    for (
+      let validationIndex = dataStartIndex;
+      validationIndex < validationDataLength + dataStartIndex;
+      validationIndex++
+    ) {
+      let inputValues = [];
+      for (
+        let dataVariableIndex = 0;
+        dataVariableIndex < this.#data.columnsCount - 1;
+        dataVariableIndex++
+      ) {
+        inputValues.push(this.#data[dataVariableIndex][validationIndex]);
+      }
+      const expected = this.#getExpectedOutput(
+        this.#data[this.#data.columnsCount - 1][validationIndex]
+      );
+      const result = this.predict(inputValues);
+      validationErrors += expected
+        .map((e, i) => e - result[i])
+        .reduce((s, e) => s + e * e, 0);
+    }
+
+    return validationErrors / validationDataLength;
   }
 
   increaseHiddenLayers() {
@@ -156,12 +258,14 @@ export default class NeuralNetwork {
     const numberOfNeuronsInLastLayer =
       this.#hiddenLayers[this.#hiddenLayers.length - 1].length;
     this.#hiddenLayers.push([
-      new Perceptron(this.#activationFunction).initialize(
-        numberOfNeuronsInLastLayer
-      ),
-      new Perceptron(this.#activationFunction).initialize(
-        numberOfNeuronsInLastLayer
-      ),
+      new Perceptron(
+        this.#hiddenActivationFunction,
+        this.#hiddenActivationFunctionDerivative
+      ).initialize(numberOfNeuronsInLastLayer),
+      new Perceptron(
+        this.#hiddenActivationFunction,
+        this.#hiddenActivationFunctionDerivative
+      ).initialize(numberOfNeuronsInLastLayer),
     ]);
     this.#updateOutputLayer();
   }
@@ -173,18 +277,18 @@ export default class NeuralNetwork {
     this.#updateOutputLayer();
   }
 
-  addNeuronToHiddenLayer(level) {
+  addNeuronToHiddenLayer(level, actFuncName) {
     this.#assertNotLearning();
+    const [actFunc, actFuncDer] = this.#getActivationFunction(actFuncName);
     const prevLayer =
       level === 0 ? this.#inputLayer : this.#hiddenLayers[level - 1];
     const nextLayer =
       level === this.#hiddenLayers.length - 1
         ? this.#outputLayer
         : this.#hiddenLayers[level + 1];
-    const neuron = new Perceptron(
-      this.#activationFunction,
-      this.#activationFunctionDerivative
-    ).initialize(prevLayer.length);
+    const neuron = new Perceptron(actFunc, actFuncDer).initialize(
+      prevLayer.length
+    );
     this.#hiddenLayers[level].push(neuron);
     nextLayer.forEach((neuron) =>
       neuron.initialize(this.#hiddenLayers[level].length)
@@ -203,22 +307,43 @@ export default class NeuralNetwork {
     );
   }
 
-  extractWeights() {
-    const weights = [];
-    for (let i = 0; i < this.#hiddenLayers.length; i++) {
-      for (const neuron of this.#hiddenLayers[i]) {
-        weights.concat(neuron.inputWeights);
-      }
-    }
-
-    return weights;
+  extractNetworkParams() {
+    return {
+      hiddenLayers: this.#hiddenLayers.map((layer) =>
+        layer.map((neuron) => {
+          return { weights: neuron.inputWeights, theta: neuron.theta };
+        })
+      ),
+      outputLayer: this.#outputLayer.map((neuron) => {
+        return { weights: neuron.inputWeights, theta: neuron.theta };
+      }),
+    };
   }
 
-  updateLayerActivationFunction(actFuncName, level) {
-    const [func, funcDerv] = this.#getActivationFunction(actFuncName);
-    for (const neuron of this.#hiddenLayers[level]) {
-      neuron.activationFunction = func;
-      neuron.activationFunctionDerivative = funcDerv;
+  extractModel() {
+    const layers = this.#hiddenLayers.concat([[...this.#outputLayer]]);
+    return (inputs) => {};
+  }
+
+  updateHiddenLayersActivationFunction(actFuncName) {
+    [this.#hiddenActivationFunction, this.#hiddenActivationFunctionDerivative] =
+      this.#getActivationFunction(actFuncName);
+    for (const layer of this.#hiddenLayers) {
+      for (const neuron of layer) {
+        neuron.activationFunction = this.#hiddenActivationFunction;
+        neuron.activationFunctionDerivative =
+          this.#hiddenActivationFunctionDerivative;
+      }
+    }
+  }
+
+  updateOutputLayerActivationFunction(actFuncName) {
+    [this.#outputActivationFunction, this.#outputActivationFunctionDerivative] =
+      this.#getActivationFunction(actFuncName);
+    for (const neuron of this.#outputLayer) {
+      neuron.activationFunction = this.#outputActivationFunction;
+      neuron.activationFunctionDerivative =
+        this.#outputActivationFunctionDerivative;
     }
   }
 
@@ -232,6 +357,30 @@ export default class NeuralNetwork {
 
   getOutputLayer() {
     return this.#outputLayer;
+  }
+
+  predict(inputs) {
+    const layers = this.#hiddenLayers.concat([[...this.#outputLayer]]);
+    let layerValues = inputs.map((val) => {
+      return { value: parseFloat(val) };
+    });
+    for (let layerIndex = 0; layerIndex < layers.length; layerIndex++) {
+      layerValues = layers[layerIndex].map((neuron) =>
+        neuron.activate(layerValues.map((val) => val.value))
+      );
+    }
+
+    return layerValues.map((val) => val.value);
+  }
+
+  reset() {
+    this.#assertNotLearning();
+    const layers = this.#hiddenLayers.concat([[...this.#outputLayer]]);
+    for (const layer of layers) {
+      for (const neuron of layer) {
+        neuron.initialize(neuron.inputWeights.length);
+      }
+    }
   }
 
   #updateOutputLayer() {
@@ -255,9 +404,56 @@ export default class NeuralNetwork {
     }
   }
 
+  #setNetworkParams({ hiddenLayers, outputLayer }) {
+    this.#hiddenLayers = [];
+    for (let i = 0; i < hiddenLayers.length; i++) {
+      const hiddenLayer = hiddenLayers[i];
+      this.#hiddenLayers.push([]);
+      for (const neuronInfo of hiddenLayer) {
+        const neuron = new Perceptron(
+          this.#hiddenActivationFunction,
+          this.#hiddenActivationFunctionDerivative
+        );
+        neuron.inputWeights = neuronInfo.weights;
+        neuron.theta = neuronInfo.theta;
+        this.#hiddenLayers[i].push(neuron);
+      }
+    }
+
+    this.#outputLayer = [];
+    for (const neuronInfo of outputLayer) {
+      const neuron = new Perceptron(
+        this.#outputActivationFunction,
+        this.#outputActivationFunctionDerivative
+      );
+      neuron.inputWeights = neuronInfo.weights;
+      neuron.theta = neuronInfo.theta;
+      this.#outputLayer.push(neuron);
+    }
+  }
+
   #assertNotLearning() {
     if (this.#isLearning) {
       throw new Error("Can't update network while learning.");
+    }
+  }
+
+  #getExpectedOutput(actualValue) {
+    const expectedValue = parseInt(actualValue);
+    if (this.#outputLayer.length === 1) {
+      return [
+        this.#outputActivationFunction.name === "tanh" && expectedValue === 0
+          ? -1
+          : expectedValue,
+      ];
+    }
+
+    if (this.#outputLayer.length > 1) {
+      const expectedOutput = new Array(this.#outputLayer.length).fill(
+        this.#outputActivationFunction.name === "tanh" ? -1 : 0
+      );
+      expectedOutput[expectedValue] = 1;
+      return expectedOutput;
     }
   }
 }

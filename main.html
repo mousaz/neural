@@ -12,7 +12,21 @@
       <input type="text" id="error-goal" value="0.03" />
       <label for="epochs"># Epochs:</label>
       <input type="text" id="epochs" value="1000" />
+      <label for="data-dist">Learning,Testing,Validation%</label>
+      <input type="text" id="data-dist" value="70,15,15" />
       <button id="start-learning">Start</button>
+      <button id="stop-learning">Stop</button>
+      <button id="start-testing">Test</button>
+      <button id="reset-button">Reset</button>
+    </div>
+    <div>
+      <label id="success-rate">Success Rate:</label>
+    </div>
+    <div>
+      <label for="predict-inputs">Inputs:</label>
+      <input type="text" id="predict-inputs" value="x1,x2,...,xn" />
+      <button id="predict-button">Predict</button>
+      <label id="predict-result">Result:</label>
     </div>
     <div>
       <label>Number of Hidden Layers: </label>
@@ -21,49 +35,57 @@
       <button id="add-hidden-layer">+</button>
     </div>
     <div id="layers-config-container">
+      <label for="hidden-activation-func">Hidden Activation Function:</label>
+      <select name="hidden-act-func" id="hidden-activation-func">
+        <option value="relu">ReLU</option>
+        <option value="tanh">tanh</option>
+        <option value="linear">Linear</option>
+        <option value="sig">Sigmoid</option>
+      </select>
+      <label for="output-activation-func">Output Activation Function:</label>
+      <select name="output-act-func" id="output-activation-func">
+        <option value="tanh">tanh</option>
+        <option value="sig">Sigmoid</option>
+      </select>
       <div id="layer-1-config">
-        <label for="activation-func-1">Activation Function:</label>
-        <select name="act-func" id="activation-func-1">
-          <option value="relu">ReLU</option>
-          <option value="linear">Linear</option>
-          <option value="sig">Sigmoid</option>
-          <option value="tanh">tanh</option>
-        </select>
-        <label># Neurons</label>
+        <label># Neurons (Hidden Layer 1)</label>
         <button id="remove-neuron-hidden-layer-1">-</button>
         <label id="num-of-hiddenLayer-1-label">2</label>
         <button id="add-neuron-hidden-layer-1">+</button>
       </div>
       <div id="layer-2-config" style="visibility: hidden">
-        <label for="activation-func-2">Activation Function:</label>
-        <select name="act-func" id="activation-func-2">
-          <option value="relu">ReLU</option>
-          <option value="linear">Linear</option>
-          <option value="sig">Sigmoid</option>
-          <option value="tanh">tanh</option>
-        </select>
-        <label># Neurons</label>
+        <label># Neurons (Hidden Layer 2)</label>
         <button id="remove-neuron-hidden-layer-2">-</button>
         <label id="num-of-hiddenLayer-2-label">2</label>
         <button id="add-neuron-hidden-layer-2">+</button>
       </div>
       <div id="layer-3-config" style="visibility: hidden">
-        <label for="activation-func-3">Activation Function:</label>
-        <select name="act-func" id="activation-func-3">
-          <option value="relu">ReLU</option>
-          <option value="linear">Linear</option>
-          <option value="sig">Sigmoid</option>
-          <option value="tanh">tanh</option>
-        </select>
-        <label># Neurons</label>
+        <label># Neurons (Hidden Layer 3)</label>
         <button id="remove-neuron-hidden-layer-3">-</button>
         <label id="num-of-hiddenLayer-3-label">2</label>
         <button id="add-neuron-hidden-layer-3">+</button>
       </div>
     </div>
     <div>
-      <canvas id="network-canvas" width="800" height="500"></canvas>
+      <canvas id="network-canvas" width="800" height="400"></canvas>
       <canvas id="data-canvas" width="400" height="400"></canvas>
+      <div>
+        <label id="epochs-run">Epochs:</label>
+      </div>
+      <div>
+        <label id="error-value">Error:</label>
+      </div>
+    </div>
+    <div style="width: 800px">
+      <div
+        style="font-size: 18px; background-color: lightgray; font-weight: bold"
+      >
+        Network Parameters
+      </div>
+      <div
+        id="model-representation"
+        style="overflow-y: auto; height: 150px; width: 800px"
+      ></div>
     </div>
     <script type="application/javascript" src="DataLoader.js"></script>
     <script type="module">
@@ -81,29 +103,58 @@
         return [max, min];
       }
 
-      function getClasses(vector) {
-        const classes = {};
-        let i = 0;
-        for (const value of vector) {
-          if (classes[value] === undefined) {
-            classes[value] = i;
-            i++;
+      function resolveClass(predictedClasses) {
+        let predIndex =
+          predictedClasses.length === 1
+            ? predictedClasses[0] >= 0.5
+              ? 1
+              : 0
+            : 0;
+        let topPrediction = predictedClasses[0];
+        for (let p = 1; p < predictedClasses.length; p++) {
+          if (predictedClasses[p] > topPrediction) {
+            predIndex = p;
+            topPrediction = predictedClasses[p];
           }
         }
 
-        return classes;
+        return predIndex;
       }
 
-      function drawData(data) {
+      function drawData(data, neuralNetworkInstance) {
         const dataCanvas = document.getElementById("data-canvas");
         const dataCanvasCtx = dataCanvas.getContext("2d");
-        const colors = ["green", "red", "yellow", "orange", "magenta"];
-        const shapes = ["x", "o", "△", "*", "☆"];
+        const colors = ["green", "red", "orange", "purple", "yellow"];
+        const modelColors = [
+          "rgba(144, 238, 144, 0.5)",
+          "rgba(250, 128, 114, 0.5)",
+          "rgba(255, 127, 80, 0.5)",
+          "rgba(230, 230, 250, 0.5)",
+          "rgba(255, 250, 205, 0.5)",
+        ];
+        const shapes = ["x", "o", "△", "☆", "*"];
         const [xMax, xMin] = getMaximumAndMinimum(data[0]);
         const [yMax, yMin] = getMaximumAndMinimum(data[1]);
-        const classes = getClasses(data[2]);
         dataCanvasCtx.fillStyle = "lightGray";
         dataCanvasCtx.fillRect(0, 0, dataCanvas.width, dataCanvas.height);
+
+        // Draw model layer representation
+        for (let i = xMin; i <= xMax; i += (xMax - xMin) / 100) {
+          for (let j = yMin; j <= yMax; j += (yMax - yMin) / 100) {
+            const predictedClasses = neuralNetworkInstance.predict([i, j]);
+            let predIndex = resolveClass(predictedClasses);
+
+            dataCanvasCtx.fillStyle = modelColors[predIndex];
+            dataCanvasCtx.beginPath();
+            const r = 5;
+            const x = (dataCanvas.width * (i - xMax)) / (xMin - xMax) - r;
+            const y = (dataCanvas.height * (j - yMax)) / (yMin - yMax) - r;
+            dataCanvasCtx.arc(x, y, r, 0, 2 * Math.PI);
+            dataCanvasCtx.fill();
+          }
+        }
+
+        // Draw data points
         for (let i = 0; i < data[0].length; i++) {
           const x =
             (dataCanvas.width * (parseFloat(data[0][i]) - xMax)) /
@@ -111,8 +162,9 @@
           const y =
             (dataCanvas.height * (parseFloat(data[1][i]) - yMax)) /
             (yMin - yMax);
-          dataCanvasCtx.strokeStyle = colors[classes[data[2][i]]];
-          dataCanvasCtx.strokeText(shapes[classes[data[2][i]]], x, y);
+          const cIndex = parseInt(data[2][i]);
+          dataCanvasCtx.strokeStyle = colors[cIndex];
+          dataCanvasCtx.strokeText(shapes[cIndex], x, y);
         }
       }
 
@@ -178,6 +230,11 @@
           const x1 = xStart + shift;
           const y1 = i * (neuronDimension + 3 * shift) + shift;
           networkCanvasCtx.fillRect(x1, y1, neuronDimension, neuronDimension);
+          networkCanvasCtx.strokeText(
+            neuron.activationFunction.name,
+            x1 + shift,
+            y1 + neuronDimension / 2
+          );
 
           for (let j = 0; j < prevLayerNeuronsCount; j++) {
             networkCanvasCtx.beginPath();
@@ -207,28 +264,118 @@
           document.getElementById(
             `num-of-hiddenLayer-${num + 1}-label`
           ).innerText = "2";
-          document.getElementById(`activation-func-${num + 1}`).value = "relu";
         }
       }
 
+      function updateModelPresentation({ hiddenLayers, outputLayer }) {
+        const neurons = hiddenLayers
+          .reduce((neurons, layer) => neurons.concat(layer), [])
+          .concat(outputLayer);
+        const weights = neurons.reduce(
+          (ws, neuron) => ws.concat(neuron.weights),
+          []
+        );
+        const thetas = neurons.map((n) => n.theta);
+        const wStr = weights.map((w, i) => `w${i} = ${w}`).join(", ");
+        const thetaStr = thetas.map((t, i) => `θ${i} = ${t}`).join(", ");
+
+        document.getElementById(
+          "model-representation"
+        ).innerHTML = `<div>${wStr}</div><div>${thetaStr}</div>`;
+      }
+
+      function updateProgress(data) {
+        document.getElementById(
+          "epochs-run"
+        ).innerText = `Epochs: ${window.epochsCounter}`;
+        document.getElementById(
+          "error-value"
+        ).innerText = `MSE: ${window.errorValue}, ValidationError: ${data.validationError}`;
+      }
+
+      function resetControls() {}
+
       const fileSelector = document.getElementById("file-selector");
+      const hiddenActFunc = document.getElementById("hidden-activation-func");
+      const outputActFunc = document.getElementById("output-activation-func");
       fileSelector.addEventListener("change", (event) => {
         const fileList = event.target.files;
         loadDataFromFile(fileList[0]).then((data) => {
-          const activationFunc =
-            document.getElementById("activation-func-1").value;
-          window.neuralNetworkInstance = new NeuralNetwork(
+          window.data = data;
+          window.epochsCounter = 0;
+          const neuralNetworkInstance = new NeuralNetwork(
             data,
-            activationFunc,
+            hiddenActFunc.value,
+            outputActFunc.value,
             true
           );
-          drawData(data);
-          drawNetwork(window.neuralNetworkInstance);
+          window.networkParams = neuralNetworkInstance.extractNetworkParams();
+          drawData(data, neuralNetworkInstance);
+          drawNetwork(neuralNetworkInstance);
+          updateModelPresentation(neuralNetworkInstance.extractNetworkParams());
+          resetControls();
         });
       });
 
+      const stopButton = document.getElementById("stop-learning");
+      stopButton.onclick = () => {
+        if (window.learningWorker) {
+          window.learningWorker.terminate();
+          window.learningWorker = null;
+        }
+      };
+
+      const testButton = document.getElementById("start-testing");
+      testButton.onclick = () => {
+        if (window.learningWorker) {
+          window.learningWorker.terminate();
+        }
+
+        const neuralNetworkInstance = new NeuralNetwork(
+          data,
+          hiddenActFunc.value,
+          outputActFunc.value,
+          true,
+          window.networkParams
+        );
+        const [learn, test, validation] = document
+          .getElementById("data-dist")
+          .value.split(",")
+          .map((val) => parseInt(val) / 100);
+        const testDataLength = Math.floor(window.data.rowsCount * test);
+        let errors = 0;
+        for (
+          let i = window.data.rowsCount - testDataLength;
+          i < window.data.rowsCount;
+          i++
+        ) {
+          const inputValues = [];
+          for (let j = 0; j < window.data.columnsCount - 1; j++) {
+            inputValues.push(window.data[j][i]);
+          }
+          const expectedResult = parseInt(
+            window.data[window.data.columnsCount - 1][i]
+          );
+          const result = resolveClass(
+            neuralNetworkInstance.predict(inputValues)
+          );
+          if (expectedResult !== result) {
+            errors++;
+          }
+        }
+
+        const successRate = (testDataLength - errors) / testDataLength;
+        document.getElementById(
+          "success-rate"
+        ).innerText = `Success Rate: ${successRate}`;
+      };
+
       const startButton = document.getElementById("start-learning");
       startButton.onclick = () => {
+        const [learn, test, validation] = document
+          .getElementById("data-dist")
+          .value.split(",")
+          .map((val) => parseInt(val) / 100);
         const epochs = parseInt(document.getElementById("epochs").value);
         const learningRate = parseFloat(
           document.getElementById("learning-rate").value
@@ -236,11 +383,71 @@
         const errorGoal = parseFloat(
           document.getElementById("error-goal").value
         );
-        window.neuralNetworkInstance.startLearning(
-          learningRate,
+        window.learningWorker = new Worker("Worker.js", { type: "module" });
+        window.learningWorker.onmessage = ({ data }) => {
+          window.networkParams = data.networkParams;
+          window.errorValue = data.mse;
+          if (data.action === "EpochCompleted") {
+            window.epochsCounter += 1;
+            const neuralNetworkInstance = new NeuralNetwork(
+              window.data,
+              hiddenActFunc.value,
+              outputActFunc.value,
+              true,
+              window.networkParams
+            );
+            drawData(window.data, neuralNetworkInstance);
+            updateModelPresentation(data.networkParams);
+            updateProgress(data);
+          }
+        };
+        window.learningWorker.postMessage({
+          networkParams: window.networkParams,
+          hiddenActFunc: hiddenActFunc.value,
+          outputActFunc: outputActFunc.value,
+          data: window.data,
+          learnTesting: [learn, validation],
           epochs,
-          errorGoal
+          learningRate,
+          errorGoal,
+        });
+      };
+
+      const resetButton = document.getElementById("reset-button");
+      resetButton.onclick = () => {
+        const neuralNetworkInstance = new NeuralNetwork(
+          window.data,
+          hiddenActFunc.value,
+          outputActFunc.value,
+          true,
+          window.networkParams
         );
+        neuralNetworkInstance.reset();
+        window.epochsCounter = 0;
+        window.errorValue = 0;
+        window.networkParams = neuralNetworkInstance.extractNetworkParams();
+        drawNetwork(neuralNetworkInstance);
+        updateModelPresentation(neuralNetworkInstance.extractNetworkParams());
+        drawData(window.data, neuralNetworkInstance);
+        updateProgress();
+      };
+
+      const predictButton = document.getElementById("predict-button");
+      predictButton.onclick = () => {
+        const neuralNetworkInstance = new NeuralNetwork(
+          window.data,
+          hiddenActFunc.value,
+          outputActFunc.value,
+          true,
+          window.networkParams
+        );
+        const inputValues = document
+          .getElementById("predict-inputs")
+          .value.split(",");
+        const result = resolveClass(neuralNetworkInstance.predict(inputValues));
+        document.getElementById(
+          "predict-result"
+        ).innerText = `Result: ${result}`;
       };
 
       const addHiddenLayer = document.getElementById("add-hidden-layer");
@@ -249,11 +456,20 @@
         let val = parseInt(label.innerText);
         if (val == 3) return;
         val++;
-        if (window.neuralNetworkInstance) {
-          window.neuralNetworkInstance.increaseHiddenLayers();
-          drawNetwork(window.neuralNetworkInstance);
+        if (window.networkParams) {
+          const neuralNetworkInstance = new NeuralNetwork(
+            window.data,
+            hiddenActFunc.value,
+            outputActFunc.value,
+            true,
+            window.networkParams
+          );
+          neuralNetworkInstance.increaseHiddenLayers();
+          window.networkParams = neuralNetworkInstance.extractNetworkParams();
+          drawNetwork(neuralNetworkInstance);
           label.innerText = val;
           updateLayersConfig(true, val);
+          updateModelPresentation(window.networkParams);
         }
       };
 
@@ -263,25 +479,52 @@
         let val = parseInt(label.innerText);
         if (val == 1) return;
         val--;
-        if (window.neuralNetworkInstance) {
-          window.neuralNetworkInstance.decreaseHiddenLayers();
-          drawNetwork(window.neuralNetworkInstance);
+        if (window.networkParams) {
+          const neuralNetworkInstance = new NeuralNetwork(
+            window.data,
+            hiddenActFunc.value,
+            outputActFunc.value,
+            true,
+            window.networkParams
+          );
+          neuralNetworkInstance.decreaseHiddenLayers();
+          window.networkParams = neuralNetworkInstance.extractNetworkParams();
+          drawNetwork(neuralNetworkInstance);
           label.innerText = val;
           updateLayersConfig(false, val);
+          updateModelPresentation(window.networkParams);
+        }
+      };
+
+      hiddenActFunc.onchange = () => {
+        if (window.networkParams) {
+          const neuralNetworkInstance = new NeuralNetwork(
+            window.data,
+            hiddenActFunc.value,
+            outputActFunc.value,
+            true,
+            window.networkParams
+          );
+          window.networkParams = neuralNetworkInstance.extractNetworkParams();
+          drawNetwork(neuralNetworkInstance);
+        }
+      };
+
+      outputActFunc.onchange = () => {
+        if (window.networkParams) {
+          const neuralNetworkInstance = new NeuralNetwork(
+            window.data,
+            hiddenActFunc.value,
+            outputActFunc.value,
+            true,
+            window.networkParams
+          );
+          window.networkParams = neuralNetworkInstance.extractNetworkParams();
+          drawNetwork(neuralNetworkInstance);
         }
       };
 
       for (let i = 0; i < 3; i++) {
-        const actFunc = document.getElementById(`activation-func-${i + 1}`);
-        actFunc.onchange = () => {
-          if (window.neuralNetworkInstance) {
-            window.neuralNetworkInstance.updateLayerActivationFunction(
-              actFunc.value,
-              i
-            );
-          }
-        };
-
         document.getElementById(`remove-neuron-hidden-layer-${i + 1}`).onclick =
           () => {
             const label = document.getElementById(
@@ -290,23 +533,47 @@
             let val = parseInt(label.innerText);
             if (val == 1) return;
             val--;
-            if (window.neuralNetworkInstance) {
-              window.neuralNetworkInstance.removeNeuronFromHiddenLayer(i);
-              drawNetwork(window.neuralNetworkInstance);
+            if (window.networkParams) {
+              const neuralNetworkInstance = new NeuralNetwork(
+                window.data,
+                hiddenActFunc.value,
+                outputActFunc.value,
+                true,
+                window.networkParams
+              );
+              neuralNetworkInstance.removeNeuronFromHiddenLayer(i);
+              window.networkParams =
+                neuralNetworkInstance.extractNetworkParams();
+              drawNetwork(neuralNetworkInstance);
+              updateModelPresentation(window.networkParams);
               label.innerText = val;
             }
           };
+
         document.getElementById(`add-neuron-hidden-layer-${i + 1}`).onclick =
           () => {
             const label = document.getElementById(
               `num-of-hiddenLayer-${i + 1}-label`
             );
             let val = parseInt(label.innerText);
-            if (val == 6) return;
+            if (val == 5) return;
             val++;
-            if (window.neuralNetworkInstance) {
-              window.neuralNetworkInstance.addNeuronToHiddenLayer(i);
-              drawNetwork(window.neuralNetworkInstance);
+            if (window.networkParams) {
+              const neuralNetworkInstance = new NeuralNetwork(
+                window.data,
+                hiddenActFunc.value,
+                outputActFunc.value,
+                true,
+                window.networkParams
+              );
+              neuralNetworkInstance.addNeuronToHiddenLayer(
+                i,
+                hiddenActFunc.value
+              );
+              window.networkParams =
+                neuralNetworkInstance.extractNetworkParams();
+              drawNetwork(neuralNetworkInstance);
+              updateModelPresentation(window.networkParams);
               label.innerText = val;
             }
           };
